@@ -52,10 +52,10 @@ BATCH_ID=test_000 ./scripts/truth_from_hybrid.sh
 BATCH_ID=test_000 ./scripts/transfer_labels_to_short.sh
 
 - prune_short_graph.sh
-BATCH_ID=test_000 ./scripts/prune_short_graph.sh
+  BATCH_ID=test_000 ./scripts/prune_short_graph.sh
 
 - pack_features_short.sh
-BATCH_ID=test_000 ./scripts/pack_features_short.sh
+  BATCH_ID=test_000 ./scripts/pack_features_short.sh
 
 - edge_read_support_short.sh
 BATCH_ID=test_000 ./scripts/edge_read_support_short.sh
