@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# edge_read_support_short.sh — v9 minimal delta vs v8
-# Compute per-edge read support on the **pruned SHORT** Unicycler graph using minigraph.
-#
 #SBATCH --job-name=edge_read_support_short
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=12G
@@ -10,21 +7,19 @@
 
 set -euo pipefail
 
-# ---- Config (env-overridable) ------------------------------------------------
 BASE="${BASE:-$PWD}"
 : "${BATCH_ID:?set BATCH_ID=your_batch_id}"
 
 MINIGRAPH="${MINIGRAPH:-$BASE/envs/label_env/bin/minigraph}"
-MG_PRESET_SHORT="${MG_PRESET_SHORT:-sr}"       # short reads
-MG_PRESET_LONG="${MG_PRESET_LONG:-lr}"         # long reads
-GAF_COUNT_MODE="${GAF_COUNT_MODE:-all_edges}"  # all_edges | first_last
+MG_PRESET_SHORT="${MG_PRESET_SHORT:-sr}"       
+MG_PRESET_LONG="${MG_PRESET_LONG:-lr}"        
+GAF_COUNT_MODE="${GAF_COUNT_MODE:-all_edges}"  
 
 THREADS="${SLURM_CPUS_PER_TASK:-8}"
-END_MAX="${END_MAX:-1000}"                     # bp to nearest end (short-read anchors)
+END_MAX="${END_MAX:-1000}"                   
 MAPQ_MIN="${MAPQ_MIN:-20}"
 USE_LOCAL_SCRATCH="${USE_LOCAL_SCRATCH:-1}"
 
-# v9: SHORT dir (not generic v8 Unicycler dir)
 U="$BASE/batches_being_processed/${BATCH_ID}.SHORT/Unicycler"
 STAGED="$BASE/staging/$BATCH_ID/merged_fastqs"
 TMP="${SLURM_TMPDIR:-$BASE/work/edge_support_tmp}"
@@ -34,8 +29,6 @@ mkdir -p "$TMP" "$BASE/slurm"
 [[ -d "$U"      ]] || { echo "[e] Unicycler dir not found: $U"; exit 1; }
 [[ -d "$STAGED" ]] || { echo "[e] merged_fastqs dir not found: $STAGED"; exit 1; }
 
-# ---- Discover samples ---------------------------------------------------------
-# v9: discover by pruned GFA names
 mapfile -t PRUNED < <(find "$U" -maxdepth 1 -type f -name '*.assembly.pruned.gfa.gz' | LC_ALL=C sort)
 ((${#PRUNED[@]})) || { echo "[e] no *.assembly.pruned.gfa.gz under $U (run prune first)"; exit 2; }
 
@@ -60,7 +53,6 @@ fi
 
 echo "[i] batch=$BATCH_ID  mode=$MODE  samples=${#WORK_SAMPLES[@]}  threads=$THREADS  tmp=$TMP  presets(short=$MG_PRESET_SHORT,long=$MG_PRESET_LONG)"
 
-# ---- Helpers -----------------------------------------------------------------
 stage_to_tmp() {
   local src="$1"
   [[ -s "$src" ]] || { echo ""; return 0; }
@@ -73,7 +65,6 @@ stage_to_tmp() {
   fi
 }
 
-# identical sanitize as v8
 sanitize_gfa() {
   local in="$1" out="$2"
   if [[ "$in" =~ \.gz$ ]]; then gzip -cd "$in" > "$out.tmp"; else cp -f "$in" "$out.tmp"; fi
@@ -100,23 +91,18 @@ process_sample() {
   local sample="$1"
   echo "== $BATCH_ID :: $sample =="
 
-  # v9: pruned SHORT GFA (not raw, not HYBRID)
   local gfa_gz="$U/${sample}.assembly.pruned.gfa.gz"
   [[ -s "$gfa_gz" ]] || { echo "[e] missing pruned GFA: $gfa_gz"; return 0; }
 
   local out_csv="$U/${sample}.edge_reads.csv"
-  # --- CHANGED BLOCK (minimal): allow overwrite via OVERWRITE=1 ---
   if [[ -s "$out_csv" && "${OVERWRITE:-0}" -ne 1 ]]; then
     echo "skip (exists): $out_csv (set OVERWRITE=1 to recompute)"
     return 0
   fi
-  # --- END CHANGED BLOCK ---
 
-  # Prepare sanitized plain GFA for minigraph
   local gfa_path="$TMP/${BATCH_ID}.${sample}.assembly.pruned.sanitized.gfa"
   sanitize_gfa "$gfa_gz" "$gfa_path"
 
-  # Reads (same pattern as v8)
   local R1_SRC="$STAGED/${sample}_R1.fastq.gz"
   local R2_SRC="$STAGED/${sample}_R2.fastq.gz"
   local LON_SRC="$STAGED/${sample}_long.fastq.gz"
@@ -125,13 +111,11 @@ process_sample() {
   local R2="$(stage_to_tmp "$R2_SRC")"
   local LON="$(stage_to_tmp "$LON_SRC")"
 
-  # Output alignment files
   local s1_gaf="$TMP/${BATCH_ID}.${sample}.R1.gaf"
   local s2_gaf="$TMP/${BATCH_ID}.${sample}.R2.gaf"
   local l_gaf="$TMP/${BATCH_ID}.${sample}.long.gaf"
   rm -f "$s1_gaf" "$s2_gaf" "$l_gaf"
 
-  # Map short reads (R1 and R2 individually) to the graph
   if [[ -s "$R1" && -s "$R2" ]]; then
     echo "[i] graph-align short reads -> $s1_gaf ; $s2_gaf"
     "$MINIGRAPH" -x "$MG_PRESET_SHORT" -t "$THREADS" "$gfa_path" "$R1" > "$s1_gaf"
@@ -148,7 +132,6 @@ process_sample() {
     echo "[i] no long reads for $sample"
   fi
 
-  # Python: parse **SANITIZED** GFA + GAF(s) -> CSV
   END_MAX="$END_MAX" MAPQ_MIN="$MAPQ_MIN" GAF_COUNT_MODE="$GAF_COUNT_MODE" \
   python3 - "$gfa_path" "$out_csv" "$s1_gaf" "$s2_gaf" "$l_gaf" << 'PY'
 import sys, csv, re, os
@@ -159,7 +142,6 @@ END_MAX   = int(os.environ.get("END_MAX", "1000"))
 MAPQ_MIN  = int(os.environ.get("MAPQ_MIN", "20"))
 MODE      = os.environ.get("GAF_COUNT_MODE", "all_edges")
 
-# ---- Parse GFA edges (undirected whitelist) ----
 edges = set()
 with open(gfa_path, "rt") as fh:
   for ln in fh:
@@ -170,7 +152,6 @@ with open(gfa_path, "rt") as fh:
         u, v = (a, b) if a < b else (b, a)
         edges.add((u, v))
 
-# ---- GAF parsing helpers -----------------------------------------------------
 def nodes_from_tpath(tpath: str):
   # Support paths like ">11,<5,>20" OR "11+,5-,20+"
   return [s.lstrip('><').rstrip('+-') for s in re.split(r'[,\s]+', tpath) if s]
@@ -222,7 +203,6 @@ def base_id(q):
   q=q.split()[0]
   return re.sub(r"/[12]$", "", q)
 
-# v9 RELAXATION: path-end anchoring (works for single- or multi-node paths)
 def anchor_from_path_end(rec, end_max):
   if not rec["nodes"]:
     return None
@@ -232,7 +212,6 @@ def anchor_from_path_end(rec, end_max):
     return rec["nodes"][-1]
   return None
 
-# ---- Short reads: pair-based counting using path-end anchors -----------------
 pair_counts = defaultdict(int)
 s1_best = parse_gaf_best(s1_gaf)
 s2_best = parse_gaf_best(s2_gaf)
@@ -251,7 +230,6 @@ if s1_best or s2_best:
     if (x, y) in edges:
       pair_counts[(x, y)] += 1
 
-# ---- Long reads: reconstruct path from ALL records per read ------------------
 long_counts = defaultdict(int)
 l_all = parse_gaf_all(l_gaf)
 
@@ -282,7 +260,6 @@ for q, recs in l_all.items():
     if (u, v) in edges:
       long_counts[(u, v)] += 1
 
-# ---- Emit CSV (include zeros for all whitelist edges) ------------------------
 os.makedirs(os.path.dirname(out_csv), exist_ok=True)
 with open(out_csv, "w", newline="") as out:
   w = csv.writer(out)
@@ -294,7 +271,6 @@ with open(out_csv, "w", newline="") as out:
 print(f"[ok] wrote {out_csv}")
 PY
 
-  # --- CHANGED BLOCK (minimal): hard invariant check against pruned GFA IDs ---
   awk -F'\t' '$1=="S"{print $2}' "$gfa_path" | LC_ALL=C sort -u > "$TMP/${sample}.nodes.txt"
   awk -F',' 'NR>1{print $1; print $2}' "$out_csv" | LC_ALL=C sort -u > "$TMP/${sample}.edge_nodes.txt"
   if comm -13 "$TMP/${sample}.nodes.txt" "$TMP/${sample}.edge_nodes.txt" | head -n1 | grep -q .; then
@@ -302,12 +278,10 @@ PY
     echo "    tip: set OVERWRITE=1 to recompute, or check prune step outputs"
     exit 9
   fi
-  # --- END CHANGED BLOCK ---
 
   echo "[ok] $sample done"
 }
 
-# ---- Run ---------------------------------------------------------------------
 for s in "${WORK_SAMPLES[@]}"; do
   process_sample "$s"
 done
