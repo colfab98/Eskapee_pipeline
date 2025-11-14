@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Build v8-shaped manifest from v9 artifacts (PRUNED SHORT as the GFA of record)
-# Header: gfa_gz,gfa_csv,edge_csv,sample_id
-
 set -u  # (no -e / pipefail; we handle errors explicitly)
 
 BASE="${BASE:-$PWD}"
@@ -11,9 +8,9 @@ SHORT_DIR="$BASE/batches_being_processed/${BATCH_ID}.SHORT"
 U_SHORT="$SHORT_DIR/Unicycler"
 SEL="$BASE/selections/${BATCH_ID}"
 
-COMBINED_DIR="$SEL/short_pruned_features"         # preferred features (combined CSV)
-NODES_DIR="$SEL/features/nodes"                   # fallback features (TSV -> CSV)
-EDGE_DIR="$SEL/short_pruned_edge_support"         # preferred edge support
+COMBINED_DIR="$SEL/short_pruned_features"         
+NODES_DIR="$SEL/features/nodes"                  
+EDGE_DIR="$SEL/short_pruned_edge_support"     
 
 OUT="$SHORT_DIR/plasgraph2_manifest.csv"
 TMPDIR="$SHORT_DIR/tmp_manifest_csv"
@@ -33,7 +30,6 @@ shopt -s nullglob
 for gfa in "$U_SHORT"/*.assembly.pruned.gfa.gz; do
   sample="${gfa##*/}"; sample="${sample%%.assembly.pruned.gfa.gz}"
 
-  # -------- features (gfa_csv) --------
   gfa_csv=""
   if [[ -s "$COMBINED_DIR/${sample}.csv" ]]; then
     gfa_csv="$COMBINED_DIR/${sample}.csv"
@@ -46,14 +42,13 @@ for gfa in "$U_SHORT"/*.assembly.pruned.gfa.gz; do
     continue
   fi
 
-  # -------- edge support (edge_csv) --------
   edge_csv=""
   if [[ -s "$EDGE_DIR/${sample}.edge_reads.csv" ]]; then
     edge_csv="$EDGE_DIR/${sample}.edge_reads.csv"
   elif [[ -s "$U_SHORT/${sample}.edge_reads.csv" ]]; then
     edge_csv="$U_SHORT/${sample}.edge_reads.csv"
   else
-    edge_csv=""  # allowed (v8 tolerated missing edge CSV)
+    edge_csv=""  
   fi
 
   echo "$gfa,$gfa_csv,$edge_csv,$sample" >> "$OUT"
