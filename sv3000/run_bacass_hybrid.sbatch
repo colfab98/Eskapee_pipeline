@@ -4,7 +4,7 @@
 ## #SBATCH -p YOUR_PARTITION
 #SBATCH --cpus-per-task=20
 #SBATCH --mem=2G
-#SBATCH --time=24:00:00
+#SBATCH --time=8:00:00
 #SBATCH -o logs/slurm-%x-%j.out
 #SBATCH -e logs/slurm-%x-%j.err
 #SBATCH -D .
@@ -99,5 +99,4 @@ ensure_java
 echo "Using nextflow: $(command -v nextflow)"
 echo "Java: $(java -version 2>&1 | head -n1)"
 
-# hand off to HYBRID runner (v8-identical pattern; only the target script differs)
 exec "$ROOT/scripts/run_bacass_hybrid.sh"
