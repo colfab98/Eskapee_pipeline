@@ -1,29 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Batch/env (resolves ROOT and batch-scoped dirs)
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_env.sh"
 
-# Step C – Map SRRs to Sample IDs (per PDF workflow)
 CSV="$ROOT/all_samples.csv"
 SRR_LIST="$BATCH_SEL/sra_ids_for_download.csv"
 MODE="${MODE:-test}"
 TARGET_DATASET="eskapee-${MODE}"
 
-# Batch-scoped outputs
 dataset_rows="$BATCH_SEL/dataset_rows_all.csv"
 srr_list_norm="$BATCH_SEL/srr_downloaded.list"
 map_out="$BATCH_SEL/srr_to_sample_map.csv"
 
 awk -F, -v DS="$TARGET_DATASET" 'NR==1{for(i=1;i<=NF;i++)h[$i]=i; print; next} $h["dataset"]==DS' "$CSV" > "$dataset_rows"
 
-# 2. Normalize SRR list from sra_ids_for_download.csv
 tr -d '\r' < "$SRR_LIST" \
   | tr ' ;,\t' '\n' \
   | grep -E '^[SED]RR[0-9]+' \
   | sort -u > "$srr_list_norm"
 
-# 3. Map SRR → our_id,type, restricted to SRRs actually in the list
 awk -F, 'NR==1{
   for(i=1;i<=NF;i++)h[$i]=i; next
 }{
