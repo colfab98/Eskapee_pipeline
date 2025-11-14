@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# build_plasmid_refs.sh — Stage or auto-download PLSDB and build plasmid FASTA + minimap2 index
-# RUN ON: VDI0044
 
 set -euo pipefail
 shopt -s nullglob
@@ -18,11 +16,10 @@ PLSDB_URL="${PLSDB_URL:-https://ccb-microbe.cs.uni-saarland.de/plsdb2025/downloa
 MINIMAP2="${MINIMAP2:-$BASE/envs/label_env/bin/minimap2}"
 
 OUT_FASTA="${OUT_FASTA:-$BASE/truth/ref_plasmids.fa}"
-OUT_MMI="${OUT_MMI:-$BASE/truth/indices/plsdb.mmi}"               # v9 canonical
+OUT_MMI="${OUT_MMI:-$BASE/truth/indices/plsdb.mmi}"               
 OUT_PART_PREFIX="${OUT_PART_PREFIX:-$BASE/truth/indices/plsdb.part}"
 OUT_ARGS="${OUT_ARGS:-$BASE/truth/indices/plsdb.args}"
 
-# v8 compatibility artifacts
 OUT_MMI_COMPAT="$BASE/truth/indices/plasmids.mmi"
 OUT_ARGS_COMPAT="$BASE/truth/indices/plasmids.args"
 
@@ -75,7 +72,6 @@ else
   echo "$(ts) Using existing PLSDB files (${#have_now[@]})"
 fi
 
-# Concatenate (manifest-gated)
 mapfile -t PLSDB_FILES < <(collect_plsdb_files "$PLSDB_DIR" | sort)
 (( ${#PLSDB_FILES[@]} > 0 )) || { echo "$(ts) ERROR: no PLSDB files"; exit 3; }
 find "$PLSDB_DIR" -type f -printf "%p\t%T@\t%s\n" | sort -k1,1 > "$MANIFEST_NEW"
@@ -121,7 +117,6 @@ shard_and_index(){
 
 build_single_index || shard_and_index
 
-# v8 compatibility
 [[ -s "$OUT_MMI" ]] && ln -sf "$(basename "$OUT_MMI")" "$OUT_MMI_COMPAT"
 [[ -s "$OUT_ARGS" ]] && cp -f "$OUT_ARGS" "$OUT_ARGS_COMPAT"
 
