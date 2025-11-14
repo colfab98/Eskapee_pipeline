@@ -13,6 +13,13 @@ This pipeline implements the dataset creation methodology described in the thesi
 
 Before running the pipeline, you must set up the project structure and input data on your **VDI** (orchestrator node).
 
+The script `scripts/build_chromosome_refs.sh` expects the PlASgraph2
+reference metadata file to be available as:
+  truth/reference_genomes.csv
+Copy `reference_genomes.csv` from the original PlASgraph2 dataset into
+`truth/reference_genomes.csv` before running `build_chromosome_refs.sh`.
+
+
 ### 1\. Create Project Directories
 
 Initialize the required folder structure for scripts, batch selections, and logs.
