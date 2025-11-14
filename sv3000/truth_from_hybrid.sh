@@ -1,9 +1,4 @@
 #!/usr/bin/env bash
-# scripts/truth_from_hybrid.sh
-# PURPOSE (v9-necessary): Build HYBRID-based truth per sample:
-#   rule stage (len/circular) → homology refinement (closed-genome vs PLSDB, 80/20, length guards) + optional PhiX drop.
-# Outputs under selections/<BATCH_ID>/labels_hybrid/
-
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_env.sh"
 
@@ -12,14 +7,12 @@ TRUTH_DIR="$ROOT/selections/$BATCH_ID/labels_hybrid"
 LOG="$BATCH_LOG/truth_from_hybrid.log"
 mkdir -p "$TRUTH_DIR" "$BATCH_LOG"
 
-# Indices
 CHR_IDX="$ROOT/truth/indices/chromosomes.mmi"
 PLS_MMI_SINGLE="$ROOT/truth/indices/plsdb.mmi"
 PLS_ARGS1="$ROOT/truth/indices/plsdb.args"
 PLS_ARGS2="$ROOT/truth/indices/plasmids.args"
 PHI_IDX="$ROOT/truth/indices/phix.mmi"
 
-# Tool
 MINIMAP="$ROOT/envs/label_env/bin/minimap2"
 if [[ ! -x "$MINIMAP" ]]; then
   if command -v minimap2 >/dev/null 2>&1; then MINIMAP="$(command -v minimap2)"; else
@@ -27,7 +20,6 @@ if [[ ! -x "$MINIMAP" ]]; then
   fi
 fi
 
-# Thresholds
 CHR_MIN=1000000
 PLAS_CIRC_MAX=1000000
 CHR_LEN_GUARD=100000
@@ -39,7 +31,6 @@ PHIX_GATE=0.80
 echo "==[ $(date -Iseconds) ]== HYBRID truth build (BATCH=$BATCH_ID)" | tee "$LOG"
 echo "[i] HYB_OUT=$HYB_OUT" | tee -a "$LOG"
 
-# Find HYBRID scaffolds (Unicycler)
 mapfile -t FASTAS < <(find "$HYB_OUT/Unicycler" -maxdepth 1 -type f \
   \( -name '*.scaffolds.fa' -o -name '*.scaffolds.fa.gz' -o -name '*.scaffolds.fasta' -o -name '*.scaffolds.fasta.gz' \) \
   | LC_ALL=C sort)
@@ -48,7 +39,6 @@ if ((${#FASTAS[@]}==0)); then
   exit 2
 fi
 
-# Resolve PLSDB indices (single or shards)
 resolve_pls_indices() {
   if [[ -s "$PLS_MMI_SINGLE" ]]; then echo "$PLS_MMI_SINGLE"; return 0; fi
   if [[ -s "$PLS_ARGS1" ]]; then tr ' \t\n' '\n' < "$PLS_ARGS1" | sed '/^$/d'; return 0; fi
@@ -60,7 +50,6 @@ resolve_pls_indices() {
   return 1
 }
 
-# PAF → coverage helper
 paf2cov_py="$(mktemp)"
 cat > "$paf2cov_py" <<'PY'
 import sys
@@ -91,7 +80,6 @@ trap 'rm -f "$paf2cov_py"' EXIT
 MASTER="$TRUTH_DIR/hybrid_truth_master.tsv"
 echo -e "sample\tcontig\tlength\tcircular\tlabel\treason\tchrom_cov\tplasmid_cov\tphix_cov" > "$MASTER"
 
-# Per-sample
 for fasta in "${FASTAS[@]}"; do
   base="$(basename "$fasta")"
   sample="${base%%.scaffolds.*}"
@@ -105,7 +93,6 @@ for fasta in "${FASTAS[@]}"; do
 
   out_tsv="$TRUTH_DIR/${sample}.hybrid_truth.tsv"
 
-  # (1) contig lengths + circular tag
   python3 - "$uf" > "$tmpdir/contigs.tsv" <<'PY'
 import sys, re
 f=sys.argv[1]
@@ -127,7 +114,6 @@ with open(f) as fh:
     flush(name,L,circ)
 PY
 
-  # (2) rule stage
   awk -v CHR_MIN="$CHR_MIN" -v PLAS_CIRC_MAX="$PLAS_CIRC_MAX" 'BEGIN{OFS="\t"}{
     contig=$1; L=$2+0; circ=($3+0); lab="unlabeled"; why="init";
     if (L>CHR_MIN) { lab="chromosome"; why="len>1M" }
@@ -135,7 +121,6 @@ PY
     print contig, L, circ, lab, why
   }' "$tmpdir/contigs.tsv" > "$tmpdir/labels_init.tsv"
 
-  # (3) homology refinement coverage
   chrom_cov="$tmpdir/chr.cov.tsv"; plas_cov="$tmpdir/pls.cov.tsv"; phix_cov="$tmpdir/phix.cov.tsv"
   : > "$chrom_cov"; : > "$plas_cov"; : > "$phix_cov"
 
@@ -161,7 +146,6 @@ PY
     "$MINIMAP" -c -x asm5 -t 4 "$PHI_IDX" "$uf" 2>>"$LOG" | python3 "$paf2cov_py" > "$phix_cov" || true
   fi
 
-  # Join coverage to initial labels
   awk 'BEGIN{OFS="\t"}
     FNR==NR { chr[$1]=$2; next }
     FILENAME==ARGV[2]{ pls[$1]=$2; next }
@@ -169,7 +153,6 @@ PY
     { print $1,$2,$3,$4,$5,(($1 in chr)?chr[$1]:0), (($1 in pls)?pls[$1]:0), (($1 in phi)?phi[$1]:0) }
   ' "$chrom_cov" "$plas_cov" "$phix_cov" "$tmpdir/labels_init.tsv" > "$tmpdir/joined.tsv"
 
-  # (4) final decision
   {
     echo -e "contig\tL\tcirc\tinit\treason\tchr\tpls\tphix"
     cat "$tmpdir/joined.tsv"
@@ -193,13 +176,11 @@ PY
     }
   ' "$tmpdir/joined.with_header.tsv" > "$tmpdir/final.tsv"
 
-  # (5) write per-sample (exclude drops)
   {
     echo -e "contig\tlength\tcircular\tlabel\treason\tchrom_cov\tplasmid_cov\tphix_cov"
     awk '$4!="drop"{print $1"\t"$2"\t"$3"\t"$4"\t"$5"\t"$6"\t"$7"\t"$8}' "$tmpdir/final.tsv"
   } > "$out_tsv"
 
-  # Append to master
   awk -v s="$sample" 'NR>1{print s"\t"$0}' "$out_tsv" >> "$MASTER"
 
   echo "[ok] $sample -> $(awk 'END{print NR-1}' "$out_tsv") contigs labeled (truth)" | tee -a "$LOG"
