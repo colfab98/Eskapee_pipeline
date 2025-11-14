@@ -1,30 +1,22 @@
 #!/usr/bin/env bash
-# Runs SHORT-only assembly on sv3000 with strict v8-parity for caching & offline.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 : "${BATCH_ID:?set BATCH_ID}"
 
-# v8-parity: local cached assets + offline flags
 ASSETS="$HOME/.nextflow/assets/nf-core/bacass"
 CONF="$ROOT/custom.config"
-
-# v9-necessary: split outputs into .SHORT
 OUTDIR="$ROOT/batches_being_processed/${BATCH_ID}.SHORT"
 
-# v8-parity: unified work dir per batch; same cache dir
 WORK="$ROOT/work/${BATCH_ID}.SHORT"
 NXF_CONDA_CACHEDIR="${NXF_CONDA_CACHEDIR:-$ROOT/work/global_conda_cache}"
 export NXF_CONDA_CACHEDIR
 
-# v8-parity: logging artifacts (separate subdir to avoid HYBRID/SHORT collisions)
 LOGS="$ROOT/logs/$BATCH_ID/SHORT"
 mkdir -p "$LOGS" "$OUTDIR" "$ROOT/logs"
 
-# Inputs (SHORT-only)
 SHEET="$ROOT/selections/$BATCH_ID/samplesheet.short.tsv"
 
-# v8-parity: offline env, prefer env.offline.sh
 if [[ -f "$ROOT/env.offline.sh" ]]; then
   # shellcheck disable=SC1091
   source "$ROOT/env.offline.sh"
@@ -32,7 +24,6 @@ else
   export NXF_OFFLINE=true
 fi
 
-# v8-parity: Nextflow command shape (+reports) and -resume
 NF_CMD=(
   nextflow run "$ASSETS"
   -with-conda
