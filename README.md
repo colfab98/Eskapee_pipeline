@@ -13,13 +13,6 @@ This pipeline implements the dataset creation methodology described in the thesi
 
 Before running the pipeline, you must set up the project structure and input data on your **VDI** (orchestrator node).
 
-The script `scripts/build_chromosome_refs.sh` expects the PlASgraph2
-reference metadata file to be available as:
-  truth/reference_genomes.csv
-Copy `reference_genomes.csv` from the original PlASgraph2 dataset into
-`truth/reference_genomes.csv` before running `build_chromosome_refs.sh`.
-
-
 ### 1\. Create Project Directories
 
 Initialize the required folder structure for scripts, batch selections, and logs.
@@ -40,6 +33,16 @@ To prevent pipeline crashes due to missing optional QUAST outputs (e.g., when no
 The correct, crash-proof code is located in this repository at:
 `patches/nf-core-bacass-2.3.1/quast/main.nf`
 
+
+### 4\. Reference genomes
+
+The script `scripts/build_chromosome_refs.sh` expects the PlASgraph2
+reference metadata file to be available as:
+
+  truth/reference_genomes.csv
+
+Copy `reference_genomes.csv` from the original PlASgraph2 dataset into
+`truth/reference_genomes.csv` before running `build_chromosome_refs.sh`.
 
 
 ## Pipeline Orchestration
