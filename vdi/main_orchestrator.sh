@@ -1,29 +1,13 @@
 #!/usr/bin/env bash
-# main_orchestrator.sh — zero-arg driver with optional single-batch filter.
-# Usage:
-#   ./scripts/main_orchestrator.sh              # run all discovered train/test batches
-#   ./scripts/main_orchestrator.sh train 001     # only run train_001
-#   ./scripts/main_orchestrator.sh test 3        # numeric accepted; normalized to test_003
-#
-# Local steps run on VDI and block. Remote run is submitted on sv3000 with sbatch
-# (no rsync/scp), and we wait for the SLURM job(s) to finish before continuing.
-#
-# NOTE (v9 change ONLY): the single assembly submission is split into TWO sbatch
-# submissions, run sequentially with waiting in between:
-#   - scripts/run_bacass_hybrid.sbatch
-#   - scripts/run_bacass_short.sbatch
-# Post-assembly steps are v9-split (truth_from_hybrid → transfer → prune → features → edge_support).
 
 set -euo pipefail
 
-# ---------- fixed settings ----------
-REMOTE="sv3000"                      # remote HPC host
-PICK_N=5                             # default for pick_samples if needed
+REMOTE="sv3000"                      
+PICK_N=5                             
 
 MODE_ARG="${1:-}"  # train, test, or empty
 NUM_ARG="${2:-}"   # 001, 002, or empty
 
-# ---------- paths ----------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT"
@@ -84,7 +68,6 @@ remote_job_submit_and_wait(){
   _submit_and_wait "scripts/run_bacass_short.sbatch"
 }
 
-# ---------- remote helper: run a project script on sv3000 ----------
 remote_run_script(){
   local batch_id="$1"
   local script_rel="$2"    # e.g. scripts/truth_from_hybrid.sh
@@ -94,13 +77,11 @@ remote_run_script(){
   ssh "$r" "bash -lc 'set -u; cd \"\$HOME/$rbase\"; BATCH_ID=\"${batch_id}\" \"./${script_rel}\"'"
 }
 
-# Assemblies completion checks
 assemblies_present_local(){
   local d="$ROOT/assemblies/$BATCH_ID/set"
   [[ -d "$d" ]] && find "$d" -mindepth 1 -maxdepth 1 -type d | grep -q .
 }
 
-# [v9-necessary] split outputs under .HYBRID and .SHORT
 assemblies_present_remote(){
   local r="$REMOTE"; local rbase="$REMOTE_REPO_BASENAME"; local b="$BATCH_ID"
   ssh "$r" "bash -lc '
@@ -128,7 +109,6 @@ remote_x(){ # usage: remote_x scripts/truth_from_hybrid.sh
   ssh "$r" "bash -lc 'test -x \"\$HOME/$rbase/$script_rel\"'"
 }
 
-# ---------- [v9-necessary] NEW: granular status + selective submission ----------
 assemblies_status_remote(){
   local r="$REMOTE"; local rbase="$REMOTE_REPO_BASENAME"; local b="$BATCH_ID"
   ssh "$r" "bash -lc '
@@ -215,7 +195,6 @@ remote_job_submit_missing_and_wait(){
   esac
 }
 
-# ---------- once-only helpers ----------
 run_once(){
   local name="$1"; local script_path="$2"
   if is_marked "$name"; then log "[ok] once-only '$name' already done"; return 0; fi
@@ -232,7 +211,6 @@ discover_batches(){
   find "$ROOT/selections" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | sort
 }
 
-# ---------- ONCE-ONLY PREPARATION ----------
 log "== once-only preparation =="
 # (Removed) run_once "prewarm_fetchngs"        "$SCRIPTS/prewarm_fetchngs.sh"
 run_once "env_prewarm"             "$SCRIPTS/env_prewarm.sh"
@@ -241,25 +219,21 @@ run_once "build_chromosome_refs"   "$SCRIPTS/build_chromosome_refs.sh"
 run_once "build_plasmid_refs"      "$SCRIPTS/build_plasmid_refs.sh"
 run_once "prep_label_env_transfer" "$SCRIPTS/prep_label_env_and_transfer.sh"
 
-# ---------- PER-BATCH DISCOVERY ----------
 log "== per-batch execution =="
 mapfile -t BATCHES < <(discover_batches || true)
 
-# --- Argument-based batch filter ---
 if [[ -n "$MODE_ARG" && -n "$NUM_ARG" ]]; then
     # User provided a specific batch (e.g., "train 001")
     if [[ "$MODE_ARG" != "train" && "$MODE_ARG" != "test" ]]; then
         log "[error] Invalid MODE '$MODE_ARG'. Must be 'train' or 'test'."
         exit 1
     fi
-    # Format number (e.g., 1 -> 001, 003 -> 003)
     printf -v BATCH_NUM "%03d" "$((10#$NUM_ARG))"
 
     SINGLE_BATCH_ID="${MODE_ARG}_${BATCH_NUM}"
     BATCHES=("$SINGLE_BATCH_ID")
     log "[info] filtering to single batch: $SINGLE_BATCH_ID"
 elif [[ -n "$MODE_ARG" || -n "$NUM_ARG" ]]; then
-    # User provided one argument but not the other
     log "[error] Usage: $0 [train|test] [batch_num]"
     log "[error] Both MODE and NUMBER are required to filter, or neither."
     exit 1
@@ -269,14 +243,11 @@ if [[ ${#BATCHES[@]} -eq 0 ]]; then
   exit 0
 fi
 
-# ---------- PER-BATCH LOOP ----------
 for BATCH_ID in "${BATCHES[@]}"; do
   log "--- batch: $BATCH_ID ---"
 
-  # Extract MODE (train/test) from BATCH_ID (e.g., train_001 -> train)
   MODE="${BATCH_ID%%_*}"
 
-  # Handle old batch_### format for backward compatibility
   if [[ "$BATCH_ID" =~ ^batch_ ]]; then
       MODE="test" # Assume old 'batch_' is 'test'
       log "[info] Detected legacy batch '$BATCH_ID', assuming MODE=test"
