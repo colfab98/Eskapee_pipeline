@@ -1,74 +1,165 @@
-- main_orchestrator.sh
-./scripts/main_orchestrator.sh test 000
-./scripts/main_orchestrator.sh train 001
+# Eskapee Assembly & Plasmid Truth Pipeline (v9)
+
+This pipeline implements the dataset creation methodology described in the thesis **"Extending plASgraph2 with GRU-Enhanced Edge-Gated GGNNs"**. It creates training datasets for PlasGraph2 using **ESKAPEE** pathogens via a "Hybrid-to-Short" truth-transfer method:
+
+1.  **Hybrid Assembly:** Uses Short + Long reads (Unicycler) to create a high-quality ground truth graph.
+2.  **Label Generation:** Classifies hybrid contigs as Chromosome or Plasmid based on circularity, length, and homology (PLSDB/Reference Genomes).
+3.  **Label Transfer:** Projects truth labels onto a fragmented **Short-read only** assembly graph.
+4.  **Feature Extraction:** Generates node features and **Edge Read Support Counts** for machine learning training.
+
+-----
+
+## Prerequisites & Setup
+
+Before running the pipeline, you must set up the project structure and input data on your **VDI** (orchestrator node).
+
+### 1\. Create Project Directories
+
+Initialize the required folder structure for scripts, batch selections, and logs.
+
+```bash
+mkdir -p scripts selections logs
+```
+
+### 2\. Upload Input Data (`all_samples.csv`)
+
+The pipeline requires the `all_samples.csv` file (from the original plASgraph2 repository) to select and process samples. Upload this file to the root of your project directory on the VDI.
+
+
+### 3\. Apply the QUAST Patch (Critical)
+
+To prevent pipeline crashes due to missing optional QUAST outputs (e.g., when no misassemblies are found), you must **manually update** the faulty Nextflow script.
+
+The correct, crash-proof code is located in this repository at:
+`patches/nf-core-bacass-2.3.1/quast/main.nf`
+
+
+
+## Pipeline Orchestration
+
+### Automatic Execution
+
+**`main_orchestrator.sh`**
+This script runs the entire sequence automatically (Preparation → Remote Assembly → Post-Processing → Export).
+
+```bash
+# Run everything (all discovered batches)
 ./scripts/main_orchestrator.sh
 
-- env_prewarm.sh
-./scripts/env_prewarm.sh
+# Run a specific batch
+./scripts/main_orchestrator.sh test 000
+```
 
-- build_chromosome_refs.sh
-./scripts/build_chromosome_refs.sh
+-----
 
-- build_plasmid_refs.sh
-./scripts/build_plasmid_refs.sh
+## Manual Script Execution
 
-- prep_label_env_and_transfer.sh
-./scripts/prep_label_env_and_transfer.sh
+If you need to run specific steps individually (e.g., for debugging), use the commands below. **Ensure you are in the project root directory.**
 
-- pick_samples.sh
-BATCH_ID=test_000 ./scripts/pick_samples.sh 
+### 1\. Environment & References (One-Time Prep)
 
-- fetch_reads.sh
-BATCH_ID=test_000 ./scripts/fetch_reads.sh
+  * **Prewarm Environment:**
+    ```bash
+    ./scripts/env_prewarm.sh
+    ```
+  * **Build Chromosome Refs:**
+    ```bash
+    ./scripts/build_chromosome_refs.sh
+    ```
+  * **Build Plasmid Refs:**
+    ```bash
+    ./scripts/build_plasmid_refs.sh
+    ```
+  * **Prepare Label Env & Transfer:**
+    ```bash
+    ./scripts/prep_label_env_and_transfer.sh
+    ```
 
-- map_srrs.sh
-MODE=test BATCH_ID=test_000 ./scripts/map_srrs.sh
+### 2\. Sample Selection & Metadata (Local)
 
-- build_run_to_files.sh
-BATCH_ID=test_000 ./scripts/build_run_to_files.sh
+  * **Pick Samples:**
+    ```bash
+    BATCH_ID=test_000 ./scripts/pick_samples.sh
+    ```
+  * **Fetch Reads:**
+    ```bash
+    BATCH_ID=test_000 ./scripts/fetch_reads.sh
+    ```
+  * **Map SRRs:**
+    ```bash
+    MODE=test BATCH_ID=test_000 ./scripts/map_srrs.sh
+    ```
+  * **Build Run-to-Files:**
+    ```bash
+    BATCH_ID=test_000 ./scripts/build_run_to_files.sh
+    ```
+  * **Build Sample Audit:**
+    ```bash
+    BATCH_ID=test_000 ./scripts/build_sample_run_audit.sh
+    ```
+  * **Build Samplesheet:**
+    ```bash
+    BATCH_ID=test_000 ./scripts/build_samplesheet.sh
+    ```
 
-- build_sample_run_audit.sh
-BATCH_ID=test_000 ./scripts/build_sample_run_audit.sh
+### 3\. Staging & Remote Assembly
 
-- build_samplesheet.sh
-BATCH_ID=test_000 ./scripts/build_samplesheet.sh
+  * **Stage to Cluster:**
+    ```bash
+    BATCH_ID=test_000 ./scripts/stage_for_sv3000.sh
+    ```
+  * **Verify Staging:**
+    ```bash
+    BATCH_ID=test_000 ./scripts/stage_verify_offline.sh
+    ```
+  * **Submit Hybrid Assembly:**
+    ```bash
+    BATCH_ID=test_000 sbatch scripts/run_bacass_hybrid.sbatch
+    ```
+  * **Submit Short Assembly:**
+    ```bash
+    BATCH_ID=test_000 sbatch scripts/run_bacass_short.sbatch
+    ```
 
-- stage_for_sv3000.sh
-BATCH_ID=test_000 ./scripts/stage_for_sv3000.sh
+### 4\. Post-Processing & Feature Extraction (Remote)
 
-- stage_verify_offline.sh
-BATCH_ID=test_000 ./scripts/stage_verify_offline.sh
+  * **Truth Generation (Hybrid):**
+    ```bash
+    BATCH_ID=test_000 ./scripts/truth_from_hybrid.sh
+    ```
+  * **Label Transfer:**
+    ```bash
+    BATCH_ID=test_000 ./scripts/transfer_labels_to_short.sh
+    ```
+  * **Prune Short Graph:**
+    ```bash
+    BATCH_ID=test_000 ./scripts/prune_short_graph.sh
+    ```
+  * **Pack Features:**
+    ```bash
+    BATCH_ID=test_000 ./scripts/pack_features_short.sh
+    ```
+  * **Edge Read Support:**
+    ```bash
+    BATCH_ID=test_000 ./scripts/edge_read_support_short.sh
+    ```
+  * **Build Manifest:**
+    ```bash
+    BATCH_ID=test_000 ./scripts/build_plasgraph2_manifest.sh
+    ```
 
-- run_bacass_hybrid.sbatch
-BATCH_ID=test_000 sbatch scripts/run_bacass_hybrid.sbatch
+### 5\. Finalization (Local)
 
-- run_bacass_short.sbatch
-BATCH_ID=test_000 sbatch scripts/run_bacass_short.sbatch
-
-- truth_from_hybrid.sh
-BATCH_ID=test_000 ./scripts/truth_from_hybrid.sh
-
-- transfer_labels_to_short.sh
-BATCH_ID=test_000 ./scripts/transfer_labels_to_short.sh
-
-- prune_short_graph.sh
-  BATCH_ID=test_000 ./scripts/prune_short_graph.sh
-
-- pack_features_short.sh
-  BATCH_ID=test_000 ./scripts/pack_features_short.sh
-
-- edge_read_support_short.sh
-BATCH_ID=test_000 ./scripts/edge_read_support_short.sh
-
-- build_plasgraph2_manifest.sh
-BATCH_ID=test_000 ./scripts/build_plasgraph2_manifest.sh
-
-- export_batch_to_vdi.sh
-MODE=train BATCH_ID=train_000 ./scripts/export_batch_to_vdi.sh
-
-- cleanup_batch.sh
-BATCH_ID=test_000 ./scripts/cleanup_batch.sh
-
-- combine_batches.sh
-./scripts/combine_batches.sh test
-./scripts/combine_batches.sh train
+  * **Export to VDI:**
+    ```bash
+    MODE=test BATCH_ID=test_000 ./scripts/export_batch_to_vdi.sh
+    ```
+  * **Cleanup Remote:**
+    ```bash
+    BATCH_ID=test_000 ./scripts/cleanup_batch.sh
+    ```
+  * **Combine Batches:**
+    ```bash
+    ./scripts/combine_batches.sh test
+    ./scripts/combine_batches.sh train
+    ```
