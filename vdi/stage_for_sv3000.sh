@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Batch/env (resolves ROOT and batch-scoped dirs)
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_env.sh"
 
 PROJECT="$(basename "$ROOT")"
 REMOTE="sv3000:~/$PROJECT"
 RSYNC="rsync -a --info=progress2"
 
-# Inputs (local)
 CONFIG="$ROOT/custom.config"
 SAMPLESHEET="$BATCH_SEL/samplesheet.tsv"
 FASTQS_DIR="$BATCH_STAGING/merged_fastqs"
@@ -24,7 +22,6 @@ echo "[i] Conda cache : $CACHE"
 echo "[i] Bacass path : $BACASS"
 echo "[i] Config      : $CONFIG"
 
-# Sanity checks
 test -s "$SAMPLESHEET" || { echo "[e] missing samplesheet: $SAMPLESHEET"; exit 2; }
 test -s "$CONFIG"      || { echo "[e] missing custom.config at $CONFIG"; exit 2; }
 test -d "$FASTQS_DIR"  || { echo "[e] missing FASTQs dir: $FASTQS_DIR"; exit 2; }
@@ -42,7 +39,6 @@ echo "[i] FASTQs OK"
 echo "[i] cache size:"
 du -sh "$CACHE" || true
 
-# Ensure remote dirs exist
 ssh "${REMOTE%:*}" "mkdir -p ~/$PROJECT/selections/$BATCH_ID ~/$PROJECT/staging/$BATCH_ID ~/$PROJECT/work ~/$PROJECT/envs ~/$PROJECT/logs ~/.nextflow/assets/nf-core"
 
 echo "[i] rsync: samplesheet + config"
