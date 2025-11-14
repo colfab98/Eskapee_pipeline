@@ -1,23 +1,12 @@
 #!/usr/bin/env bash
-# prune_short_graph.sh — sv3000 (v9 style)
-# Remove nodes < MIN_LEN (default 100 bp) from the SHORT Unicycler GFA and bypass them
-# by reconnecting their surviving neighbors. Writes <sample>.assembly.pruned.gfa.gz.
-#
-# Inputs (sv3000):
-#   batches_being_processed/<BATCH_ID>.SHORT/Unicycler/*.assembly.gfa[.gz]
-# Outputs:
-#   batches_being_processed/<BATCH_ID>.SHORT/Unicycler/<sample>.assembly.pruned.gfa.gz
-#
-# Safe to run repeatedly; skips samples already pruned. Does not overwrite originals.
 
 set -euo pipefail
 
-# --- env & paths (sv3000) ---
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_env.sh"  # defines ROOT, BATCH_ID, BATCH_LOG
 : "${BATCH_ID:?set BATCH_ID=your_batch_id}"
 
-MIN_LEN="${MIN_LEN:-100}"        # node length cutoff (bp)
-SAMPLE_ID="${SAMPLE_ID:-}"       # optional: limit to one sample
+MIN_LEN="${MIN_LEN:-100}"      
+SAMPLE_ID="${SAMPLE_ID:-}"     
 
 U_SHORT="$ROOT/batches_being_processed/${BATCH_ID}.SHORT/Unicycler"
 TMP_ROOT="${SLURM_TMPDIR:-$ROOT/work/prune_short_tmp}"
@@ -29,11 +18,9 @@ log(){ echo "[$(date -Iseconds)] $*" | tee -a "$LOG"; }
 
 [[ -d "$U_SHORT" ]] || { echo "[e] Unicycler SHORT dir not found: $U_SHORT" | tee -a "$LOG" >&2; exit 2; }
 
-# discover GFAs
 mapfile -t GFAS < <(find "$U_SHORT" -maxdepth 1 -type f \( -name '*.assembly.gfa' -o -name '*.assembly.gfa.gz' \) | LC_ALL=C sort)
 ((${#GFAS[@]})) || { echo "[e] no *.assembly.gfa[.gz] found under $U_SHORT" | tee -a "$LOG" >&2; exit 2; }
 
-# sample filter
 declare -a WORK
 if [[ -n "$SAMPLE_ID" ]]; then
   if   [[ -f "$U_SHORT/${SAMPLE_ID}.assembly.gfa.gz" ]]; then WORK=("$U_SHORT/${SAMPLE_ID}.assembly.gfa.gz")
@@ -72,7 +59,6 @@ process_one() {
     cp -f "$gfa_path" "$gfa"
   fi
 
-  # prune + bypass (preserve original S lines for kept nodes)
   MIN_LEN="$MIN_LEN" OUT="$out_gz" python3 - "$gfa" << 'PY'
 import sys, os, gzip
 from collections import defaultdict
@@ -115,7 +101,6 @@ with open(gfa_path, "rt") as fh:
     elif t[0] == "L" and len(t) >= 6:
       edges.append((t[1], t[2], t[3], t[4], t[5], ln.rstrip("\n")))
 
-# neighbor map (orientation-agnostic for bypass logic)
 neighbors = defaultdict(set)
 for u,uo,v,vo,cg,raw in edges:
   neighbors[u].add(v)
@@ -124,7 +109,6 @@ for u,uo,v,vo,cg,raw in edges:
 pruned  = {s for s,k in keep_seg.items() if not k}
 survive = {s for s,k in keep_seg.items() if k}
 
-# bypass: for every pruned node x, fully connect surviving neighbors N(x)
 bypass = set()  # undirected key (a,b) with a<b
 for x in pruned:
   Ns = sorted(n for n in neighbors.get(x, []) if n in survive)
@@ -134,7 +118,6 @@ for x in pruned:
       if a==b: continue
       bypass.add((a,b) if a<b else (b,a))
 
-# keep original edges that don't touch pruned nodes
 kept_edges = []
 edge_set = set()  # undirected keys to avoid duplicates
 for u,uo,v,vo,cg,raw in edges:
@@ -142,7 +125,6 @@ for u,uo,v,vo,cg,raw in edges:
   kept_edges.append((u,uo,v,vo,cg,raw))
   edge_set.add((u,v) if u<v else (v,u))
 
-# add bypass edges where not already directly connected
 for a,b in sorted(bypass):
   if (a,b) in edge_set: continue
   kept_edges.append((a,"+",b,"+","0M", f"L\t{a}\t+\t{b}\t+\t0M"))
