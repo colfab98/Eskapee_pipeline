@@ -1,23 +1,4 @@
 #!/usr/bin/env bash
-# pack_features_short.sh — sv3000
-# Build node/edge feature tables from the SHORT *pruned* GFA + edge read support.
-#
-# Deterministic locations (v9):
-#   - Pruned graph:  batches_being_processed/<BATCH_ID>.SHORT/Unicycler/<sample>.assembly.pruned.gfa.gz
-#   - Edge support:  batches_being_processed/<BATCH_ID>.SHORT/Unicycler/<sample>.edge_reads.csv
-#   - Labels (opt):  selections/<BATCH_ID>/short_labels/<sample>.short_labels.tsv
-#
-# Outputs (per-sample):
-#   - selections/<BATCH_ID>/features/edges/<sample>.edge_features.tsv
-#   - selections/<BATCH_ID>/features/nodes/<sample>.node_features.tsv
-#
-# Outputs (batch-wide):
-#   - selections/<BATCH_ID>/features/edges.features.batch.tsv
-#   - selections/<BATCH_ID>/features/nodes.features.batch.tsv
-#
-# Usage:
-#   BATCH_ID=batch_001 bash scripts/pack_features_short.sh
-#   BATCH_ID=batch_001 SAMPLE_ID=S123 bash scripts/pack_features_short.sh    # one sample
 
 set -euo pipefail
 
@@ -38,7 +19,6 @@ log(){ echo "[$(date -Iseconds)] $*" | tee -a "$LOG_DIR/pack_features_short.${BA
 
 [[ -d "$U_SHORT" ]] || { echo "[e] SHORT Unicycler dir not found: $U_SHORT" >&2; exit 2; }
 
-# Discover pruned GFAs (deterministic path)
 mapfile -t PRUNED < <(find "$U_SHORT" -maxdepth 1 -type f -name '*.assembly.pruned.gfa.gz' | LC_ALL=C sort)
 ((${#PRUNED[@]})) || { echo "[e] no *.assembly.pruned.gfa.gz under $U_SHORT — run prune_short_graph.sh first" >&2; exit 2; }
 
@@ -149,7 +129,6 @@ def seg_len_from_fields(fields):
             except: pass
     return name, (0 if ln is None else ln)
 
-# Parse pruned graph
 nodes = set()
 length = {}
 edges = []
@@ -170,7 +149,6 @@ with gzip.open(pruned_gz, "rt") as fh:
             deg[u] += 1
             deg[v] += 1
 
-# ensure isolated nodes have degree 0 recorded
 for n in nodes: _ = deg[n]
 
 edge_sup = parse_edge_support(edge_csv)
@@ -178,7 +156,6 @@ labels  = parse_labels(labels_tsv)
 
 sample = os.path.basename(pruned_gz).split(".assembly.pruned.gfa.gz")[0]
 
-# Edge features
 os.makedirs(os.path.dirname(out_edges), exist_ok=True)
 with open(out_edges, "w", newline="") as fe:
     w = csv.writer(fe, delimiter="\t")
@@ -200,7 +177,6 @@ with open(out_edges, "w", newline="") as fe:
         w.writerow([sample, u, v, sp, lr, ts, ul, vl, ud, vd,
                     min(ul,vl), max(ul,vl), ul+vl, min(ud,vd), max(ud,vd), is_tip])
 
-# Node features
 os.makedirs(os.path.dirname(out_nodes), exist_ok=True)
 with open(out_nodes, "w", newline="") as fn:
     w = csv.writer(fn, delimiter="\t")
@@ -216,7 +192,6 @@ for g in "${WORK[@]}"; do
   process_one "$g"
 done
 
-# Batch aggregates
 edges_batch="$OUT_ROOT/edges.features.batch.tsv"
 nodes_batch="$OUT_ROOT/nodes.features.batch.tsv"
 rm -f "$edges_batch" "$nodes_batch"
