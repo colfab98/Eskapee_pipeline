@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Batch/env (resolves ROOT and batch-scoped dirs)
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_env.sh"
 
-# Step D – Build run_to_files.csv from nf-core/fetchngs output
 export INP="$BATCH_STAGING/results_fetchngs/samplesheet/samplesheet.csv"
 export OUT="$BATCH_SEL/run_to_files.csv"
 
