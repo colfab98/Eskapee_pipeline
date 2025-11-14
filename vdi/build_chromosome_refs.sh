@@ -1,33 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ============================
-# build_chromosome_refs.sh
-# ============================
-# Purpose:
-#   - Build chromosome reference FASTA and minimap2 index for labeling.
-#   - Also build PhiX (NC_001422.1) FASTA and index.  (v9-necessary)
-#   - Uses truth/reference_genomes.csv (from PlASgraph2) as the single source of truth.
-#   - Auto-derives truth/ref_accessions.txt if missing (supports headerless CSV).
-#
-# Behavior:
-#   - If outputs are missing or older than inputs, (re)build.
-#   - If everything is up-to-date, it exits quickly.
-#
-# Outputs:
-#   truth/ref_chromosomes.fa
-#   truth/indices/chromosomes.mmi
-#   truth/ref_phix.fa
-#   truth/indices/phix.mmi
-#
-# Inputs (expected):
-#   truth/reference_genomes.csv    # curated list from PlASgraph2 dataset
-#   truth/ref_accessions.txt       # auto-generated if absent
-#
-# Tools:
-#   - minimap2 (will try project-local env bootstrap if not found)
-#   - One of: NCBI 'datasets' or 'efetch' for accession fetching (datasets preferred, v8-parity)
-
 PROJECT_ROOT="${PROJECT_ROOT:-$PWD}"
 TRUTH="$PROJECT_ROOT/truth"
 IDX="$TRUTH/indices"
@@ -39,7 +12,6 @@ ACC="$TRUTH/ref_accessions.txt"
 FA="$TRUTH/ref_chromosomes.fa"
 MMI="$IDX/chromosomes.mmi"
 
-# PhiX outputs (added)
 PHIX_FA="$TRUTH/ref_phix.fa"
 PHIX_MMI="$IDX/phix.mmi"
 
@@ -48,7 +20,6 @@ mkdir -p "$TRUTH" "$IDX" "$LOGS" "$TMP"
 log(){ echo "[$(date +'%F %T')] $*" | tee -a "$LOGS/build_chromosome_refs.log"; }
 
 need_rebuild_chr() {
-  # Return 0 if rebuild needed, 1 if up-to-date (chromosomes)
   [[ ! -s "$FA" || ! -s "$MMI" ]] && return 0
   [[ "$CSV" -nt "$FA" || "$CSV" -nt "$MMI" ]] && return 0
   if [[ -s "$ACC" ]]; then
@@ -69,14 +40,12 @@ ensure_minimap2(){
   ENV_DIR="$PROJECT_ROOT/envs/label_env"
   TGZ="$PROJECT_ROOT/label_env.tar.gz"
 
-  # 1) Use existing unpacked env if available
   if [[ -x "$ENV_DIR/bin/minimap2" ]]; then
     export PATH="$ENV_DIR/bin:$PATH"
     log "using existing $ENV_DIR"
     return 0
   fi
 
-  # 2) Unpack prebuilt env tarball if present
   if [[ -s "$TGZ" ]]; then
     log "unpacking $TGZ -> $ENV_DIR"
     mkdir -p "$(dirname "$ENV_DIR")"
@@ -90,7 +59,6 @@ ensure_minimap2(){
     return 0
   fi
 
-  # 3) Create a minimal live env (requires internet; fine on VDI)
   if command -v mamba >/dev/null 2>&1; then PM="mamba"; else PM="conda"; fi
   log "creating live env with $PM (minimap2+python) under $ENV_DIR"
   mkdir -p "$(dirname "$ENV_DIR")"
@@ -103,7 +71,6 @@ ensure_minimap2(){
 have_datasets(){ command -v datasets >/dev/null 2>&1; }
 have_efetch(){ command -v efetch   >/dev/null 2>&1; }
 
-# v8-parity: prefer 'datasets' first, then 'efetch'
 ensure_fetch_tool(){
   if have_datasets; then echo "datasets"; return 0; fi
   if have_efetch;   then echo "efetch";   return 0; fi
@@ -111,7 +78,6 @@ ensure_fetch_tool(){
 }
 
 derive_accessions_if_needed(){
-  # If ACC missing but CSV present, derive it. Supports headerless CSV or header w/ 'accession'
   if [[ -s "$ACC" ]]; then
     log "ref_accessions.txt found ($(wc -l < "$ACC") accessions)"
     return 0
@@ -123,7 +89,6 @@ derive_accessions_if_needed(){
     # headerless: column1 is accession
     cut -d, -f1 "$CSV" | awk 'NF' | awk '!seen[$0]++' > "$ACC"
   else
-    # headered: find 'accession' column (case-insensitive)
     awk -F, '
       NR==1{
         acc=-1
@@ -203,7 +168,6 @@ main(){
     log "Accessions: $(wc -l < "$ACC")"
     local DL_DIR="$TMP/fna"; mkdir -p "$DL_DIR"
 
-    # Download each accession
     while read -r acc; do
       [[ -z "${acc:-}" ]] && continue
       local out="$DL_DIR/${acc}.fna"
@@ -216,21 +180,18 @@ main(){
       fi
     done < "$ACC"
 
-    # Concatenate FASTAs in natural order to a single FA
     log "Concatenating into $FA"
     : > "$FA.tmp"
     LC_ALL=C ls -1 "$DL_DIR"/*.fna 2>/dev/null | sort -V | while read -r f; do cat "$f" >> "$FA.tmp"; done
     mv -f "$FA.tmp" "$FA"
     sha256sum "$FA" | tee "$LOGS/ref_chromosomes.fa.sha256" >/dev/null
 
-    # Build minimap2 index
     log "Building minimap2 index: $MMI"
     minimap2 -d "$MMI" "$FA" >>"$LOGS/build_chromosome_refs.log" 2>&1
   else
     log "Chromosome refs up-to-date; skipping rebuild"
   fi
 
-  # Build/update PhiX (added)
   build_phix
 
   log "DONE"
