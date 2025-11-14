@@ -1,12 +1,7 @@
 #!/usr/bin/env bash
-# Run on VDI0044. Prewarm minimap2+minigraph env and transfer refs+env to sv3000 (offline-safe).
-# Idempotent: safe to run multiple times. If env exists but is incomplete, recreate cleanly.
 set -euo pipefail
 
-# -----------------------------
-# Config / defaults
-# -----------------------------
-REMOTE="${REMOTE:-fcolanto@sv3000}"   # override: REMOTE=user@host ./prep_label_env_and_transfer.sh
+REMOTE="${REMOTE:-fcolanto@sv3000}"  
 BASE="${BASE:-$PWD}"
 PROJ="$(basename "$BASE")"
 
@@ -23,9 +18,6 @@ PL_ARGS_PLASMIDS="$IDX_DIR/plasmids.args"       # shard list (optional, space- o
 PL_ARGS_PLSDB="$IDX_DIR/plsdb.args"             # alternate shard list name (optional)
 PL_MMI_GLOB="$IDX_DIR/plasmids.part."           # prefix for shard .mmi files
 
-# -----------------------------
-# Helpers
-# -----------------------------
 ts(){ date +"[%Y-%m-%d %H:%M:%S]"; }
 have_cmd(){ command -v "$1" >/dev/null 2>&1; }
 
@@ -36,7 +28,6 @@ any_exists_glob() {
   (( ${#arr[@]} > 0 ))
 }
 
-# Echo a space-separated list of plasmid index .mmi files
 resolve_plasmid_indices() {
   if [[ -s "$PL_MMI_SINGLE" ]]; then
     echo "$PL_MMI_SINGLE"; return 0
@@ -54,10 +45,6 @@ resolve_plasmid_indices() {
   return 1
 }
 
-# -----------------------------
-# EARLY REMOTE GUARD (short-circuit if remote is already ready)
-# Accept either a single plasmids.mmi OR a shard set; require PhiX too.
-# -----------------------------
 remote_ready_cmd="$(cat <<'BASH'
 set -euo pipefail
 if [[ ! -x ~/"$PROJ"/envs/label_env/bin/minimap2 || ! -x ~/"$PROJ"/envs/label_env/bin/minigraph ]]; then exit 3; fi
@@ -76,9 +63,6 @@ if ssh "$REMOTE" "PROJ='$PROJ' bash -lc '$remote_ready_cmd'"; then
   exit 0
 fi
 
-# -----------------------------
-# LOCAL sanity: required files
-# -----------------------------
 [[ -s "$CHR_MMI"  ]] || { echo "[e] Missing: $CHR_MMI"  >&2; exit 1; }
 [[ -s "$PHIX_MMI" ]] || { echo "[e] Missing: $PHIX_MMI" >&2; exit 1; }  # << ensure PhiX exists
 
@@ -88,10 +72,6 @@ if ! PL_LIST="$(resolve_plasmid_indices)"; then
   exit 1
 fi
 
-# -----------------------------
-# Prewarm tiny env with minimap2 + minigraph
-# Policy: if env exists but missing either tool, remove and recreate cleanly.
-# -----------------------------
 PM=""
 if have_cmd mamba; then PM="mamba"
 elif have_cmd conda; then PM="conda"
@@ -127,14 +107,8 @@ fi
 "$ENV_DIR/bin/minimap2"  --version
 "$ENV_DIR/bin/minigraph" --version
 
-# -----------------------------
-# Prepare remote dirs (match local project name)
-# -----------------------------
 ssh "$REMOTE" "mkdir -p ~/$PROJ/truth/indices ~/$PROJ/envs/label_env"
 
-# -----------------------------
-# Transfer indices
-# -----------------------------
 echo "[info] $(ts) transferring indices to $REMOTE:~/$PROJ/truth/indices/"
 rsync -av --info=progress2 "$CHR_MMI"  "$REMOTE:~/$PROJ/truth/indices/"
 rsync -av --info=progress2 "$PHIX_MMI" "$REMOTE:~/$PROJ/truth/indices/"   # << send PhiX
@@ -142,7 +116,7 @@ rsync -av --info=progress2 "$PHIX_MMI" "$REMOTE:~/$PROJ/truth/indices/"   # << s
 if [[ -s "$PL_MMI_SINGLE" ]]; then
   rsync -av --info=progress2 "$PL_MMI_SINGLE" "$REMOTE:~/$PROJ/truth/indices/"
 else
-  # Build a newline-separated list for rsync --files-from, regardless of how the args file is formatted.
+  
   tmp_list="$(mktemp)"
   if [[ -s "$PL_ARGS_PLASMIDS" ]]; then
     tr ' \t' '\n' < "$PL_ARGS_PLASMIDS" | sed '/^$/d' > "$tmp_list"
@@ -152,24 +126,17 @@ else
     # Fall back to enumerated list resolved above
     for f in $PL_LIST; do printf "%s\n" "$f" >> "$tmp_list"; done
   fi
-  # << make paths BASE-relative so rsync doesn't mirror absolute roots
+  
   sed -i "s#^$BASE/##" "$tmp_list"
   rsync -av --info=progress2 --files-from="$tmp_list" "$BASE/" "$REMOTE:~/$PROJ/"
   rm -f "$tmp_list"
 fi
 
-# Optional: transfer provenance
 [[ -s "$TRUTH/PLSDB_source.conf" ]] && rsync -av --info=progress2 "$TRUTH/PLSDB_source.conf" "$REMOTE:~/$PROJ/truth/"
 
-# -----------------------------
-# Transfer the prewarmed env
-# -----------------------------
 echo "[info] $(ts) transferring label_env (minimap2 + minigraph)"
 rsync -av --info=progress2 "$ENV_DIR/" "$REMOTE:~/$PROJ/envs/label_env/"
 
-# -----------------------------
-# Remote verification (unchanged style)
-# -----------------------------
 ssh "$REMOTE" "bash -lc '
 set -euo pipefail
 echo \"[verify] indices in ~/$PROJ/truth/indices:\"
