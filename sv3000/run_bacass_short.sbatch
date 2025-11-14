@@ -87,12 +87,10 @@ ensure_java
 echo "Using nextflow: $(command -v nextflow)"
 echo "Java: $(java -version 2>&1 | head -n1)"
 
-# >>> ONLY addition: ensure short-only samplesheet exists <<<
 if [[ ! -s "$ROOT/selections/$BATCH_ID/samplesheet.short.tsv" ]]; then
   [[ -x "$ROOT/scripts/make_short_only_samplesheet.sh" ]] || {
     echo "[e] missing $ROOT/scripts/make_short_only_samplesheet.sh" >&2; exit 4; }
   BATCH_ID="$BATCH_ID" "$ROOT/scripts/make_short_only_samplesheet.sh"
 fi
 
-# v8 pattern: hand off to the existing runner (unchanged name/behavior)
 exec "$ROOT/scripts/run_bacass_short.sh"
