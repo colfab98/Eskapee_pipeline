@@ -1,24 +1,15 @@
-#!/usr/bin/env bash
-# scripts/transfer_labels_to_short.sh
-# PURPOSE (v9-necessary):
-#   Transfer labels from HYBRID truth to SHORT contigs by aligning SHORT→HYBRID,
-#   then deciding per-short-contig labels using coverage gates (dominance & ambiguity).
-# OUTPUTS:
-#   selections/<BATCH_ID>/short_labels/<sample>.short_labels.tsv
-#   selections/<BATCH_ID>/short_labels_master.tsv
+!/usr/bin/env bash
 
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_env.sh"
 
-# --- Paths (v9 layout) ---
 HYB_UNI="$ROOT/batches_being_processed/${BATCH_ID}.HYBRID/Unicycler"
 SHO_UNI="$ROOT/batches_being_processed/${BATCH_ID}.SHORT/Unicycler"
-TRUTH_DIR="$ROOT/selections/$BATCH_ID/labels_hybrid"     # << v9 truth location
+TRUTH_DIR="$ROOT/selections/$BATCH_ID/labels_hybrid"     
 OUT_DIR="$ROOT/selections/$BATCH_ID/short_labels"
 LOG="$BATCH_LOG/transfer_labels_to_short.log"
 mkdir -p "$OUT_DIR" "$BATCH_LOG"
 
-# --- minimap2 (prefer project env) ---
 MINIMAP="$ROOT/envs/label_env/bin/minimap2"
 if [[ ! -x "$MINIMAP" ]]; then
   if command -v minimap2 >/dev/null 2>&1; then MINIMAP="$(command -v minimap2)"
@@ -28,15 +19,12 @@ if [[ ! -x "$MINIMAP" ]]; then
   fi
 fi
 
-# --- Gates (env-tunable) ---
-MIN_SUPPORT_DOM="${MIN_SUPPORT_DOM:-0.50}"   # ≥50% by one label
-MAX_OTHER_DOM="${MAX_OTHER_DOM:-0.20}"       # <20% by the other
-AMBIG_MIN="${AMBIG_MIN:-0.30}"               # both ≥30% to consider ambiguity
-AMBIG_DELTA="${AMBIG_DELTA:-0.10}"           # |p - c| ≤ 0.10 → ambiguous
-
+MIN_SUPPORT_DOM="${MIN_SUPPORT_DOM:-0.50}"  
+MAX_OTHER_DOM="${MAX_OTHER_DOM:-0.20}"      
+AMBIG_MIN="${AMBIG_MIN:-0.30}"              
+AMBIG_DELTA="${AMBIG_DELTA:-0.10}"          
 echo "==[ $(date -Iseconds) ]== Transfer HYBRID → SHORT (BATCH=$BATCH_ID)" | tee "$LOG"
 
-# --- Sample stems from Unicycler scaffolds on both sides ---
 list_stems() {
   local d="$1"
   find "$d" -maxdepth 1 -type f \
@@ -58,7 +46,6 @@ mapfile -t SHO_S <<EOF
 $(list_stems "$SHO_UNI")
 EOF
 
-# intersect (requires LC_ALL=C sorted)
 mapfile -t SAMPLES < <(printf "%s\n" "${HYB_S[@]}" "${SHO_S[@]}" \
   | sort | uniq -d)
 
@@ -67,7 +54,6 @@ if ((${#SAMPLES[@]}==0)); then
   exit 2
 fi
 
-# --- Helper: choose a scaffolds fasta path for a sample (favor .gz) ---
 pick_scaffolds() {
   local d="$1" s="$2"
   local f
@@ -82,19 +68,12 @@ pick_scaffolds() {
   return 1
 }
 
-# --- PAF→label coverage on SHORT contigs ---
 paf2labelcov_py="$(mktemp)"
 cat > "$paf2labelcov_py" <<'PY'
 import sys, collections, gzip, io, os
 
-# Inputs:
-#   1) truth_tsv   (HYBRID truth)
-#   2) paf         (SHORT vs HYBRID alignments)
-#   3) short_fa    (SHORT scaffolds FASTA)  <-- added so we include zero-hit contigs
-
 truth_tsv, paf, short_fa = sys.argv[1], sys.argv[2], sys.argv[3]
 
-# Load truth labels for HYBRID contigs
 lbl = {}
 with open(truth_tsv) as f:
     hdr = f.readline().rstrip('\n').split('\t')
@@ -119,7 +98,6 @@ def open_text_maybe_gz(path):
         return io.TextIOWrapper(gzip.open(path, 'rb'))
     return open(path, 'rt')
 
-# Enumerate ALL SHORT contigs and lengths from FASTA
 qlen = {}
 with open_text_maybe_gz(short_fa) as f:
     name = None
@@ -135,7 +113,6 @@ with open_text_maybe_gz(short_fa) as f:
     if name is not None:
         qlen[name] = L
 
-# Collect coverage intervals per label from PAF
 iv_by_q_lbl = collections.defaultdict(lambda: {'chromosome':[], 'plasmid':[], 'unlabeled':[]})
 
 if os.path.exists(paf) and os.path.getsize(paf) > 0:
@@ -154,7 +131,6 @@ if os.path.exists(paf) and os.path.getsize(paf) > 0:
             lab = lab if lab in ('chromosome','plasmid') else 'unlabeled'
             iv_by_q_lbl[q][lab].append((s, e))
 
-# Emit per-short-contig coverage (zero if no hits)
 print("short_contig\tshort_len\tcov_chr\tcov_plasmid\tcov_unlabeled")
 for q in qlen:
     L = qlen[q]
@@ -182,15 +158,12 @@ for s in "${SAMPLES[@]}"; do
   tmpdir="$(mktemp -d)"
   trap 'rm -rf "$tmpdir"' RETURN
 
-  # Align SHORT (query) to HYBRID (target). Use -c with asm5.
   paf="$tmpdir/short_vs_hybrid.paf"
   "$MINIMAP" -c -x asm5 -t "${SLURM_CPUS_PER_TASK:-8}" "$hyb_fa" "$sho_fa" > "$paf" 2>>"$LOG"
 
-  # Compute per-label coverage on SHORT contigs (now includes zero-hit contigs)
   cov_tsv="$tmpdir/label_cov.tsv"
   python3 "$paf2labelcov_py" "$truth" "$paf" "$sho_fa" > "$cov_tsv"
 
-  # Decide labels for SHORT contigs
   out_tsv="$OUT_DIR/${s}.short_labels.tsv"
   awk -v MS="$MIN_SUPPORT_DOM" -v MO="$MAX_OTHER_DOM" -v AM="$AMBIG_MIN" -v AD="$AMBIG_DELTA" 'BEGIN{OFS="\t"}
     NR==1{next}
