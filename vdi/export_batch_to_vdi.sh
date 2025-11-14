@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# v9 export with v8-parity outputs (runs on VDI0044)
-# Final on VDI: ~/assemblies/$BATCH_ID/set/*.assembly.gfa.gz + *.gfa.csv (+ edge_reads.csv if present) + eskapee_test_new.csv
 set -euo pipefail
 
 : "${BATCH_ID:?set BATCH_ID=your_batch_id}"         # e.g. batch_001
@@ -21,15 +19,12 @@ BASE="$HOME/$PROJ"
 SEL="$BASE/selections/$BATCH_ID"
 LBL_DIR="$SEL/short_labels"
 
-# export_set lives under batches_being_processed/<BATCH_ID>/export_set (v8-compatible location)
 E="$BASE/batches_being_processed/$BATCH_ID/export_set"
 
-# Labels dir may be missing if some HYBRID runs failed — warn, don't fail
 if [[ ! -d "$LBL_DIR" ]]; then
   echo "[w] labels dir missing: $LBL_DIR — samples without labels will be skipped" >&2
 fi
 
-# Find PRUNED SHORT GFAs
 mapfile -t GFAS < <(find "$BASE/batches_being_processed" -type f -name '*.assembly.pruned.gfa.gz' \
   | grep -E "/${BATCH_ID}(\.SHORT)?/Unicycler/[^/]+\.assembly\.pruned\.gfa\.gz$" \
   | LC_ALL=C sort)
@@ -42,7 +37,6 @@ fi
 rm -rf "$E"
 mkdir -p "$E/set" "$E/meta"
 
-# Helper: synthesize v8-schema gfa.csv from transferred SHORT labels (accept headered or headerless TSV/CSV)
 synth_csv() {
   local tsv="$1" out="$2"
   echo "contig,plasmid_score,chrom_score,label,length,chr_coverage,pl_coverage,un_coverage,hybrid_mapsto" > "$out"
@@ -67,9 +61,7 @@ synth_csv() {
         }
         next
       } else {
-        # headerless per-sample: 1:contig 2:length 3:label 4:reason 5:cov_chr 6:cov_plasmid 7:cov_unlabeled
         sc=1; L=2; lab=3; c=5; p=6; u=7
-        # fall through to process first data row
       }
     }
     {
@@ -79,7 +71,6 @@ synth_csv() {
       cc0= (c  ? $c+0 : 0)
       pp0= (p  ? $p+0 : 0)
 
-      # fractions -> base pairs (rounded), recompute unlabeled from max to avoid drift
       cc_bp = int(cc0 * l + 0.5)
       pp_bp = int(pp0 * l + 0.5)
       m = (cc_bp > pp_bp ? cc_bp : pp_bp)
@@ -96,7 +87,6 @@ synth_csv() {
 exported=0
 skipped=0
 
-# Build export_set from PRUNED GFAs + transferred SHORT labels
 for gfa in "${GFAS[@]}"; do
   stem="${gfa##*/}"; stem="${stem%%.assembly.pruned.gfa.gz}"  # PRUNED stem (v9)
   out_stem="$stem"                                            # v8 filename stem
@@ -104,7 +94,6 @@ for gfa in "${GFAS[@]}"; do
   tsv="$LBL_DIR/$out_stem.short_labels.tsv"
   edge_csv="$gfa_dir/$out_stem.edge_reads.csv"
 
-  # Pre-checks: require labels + edge support; skip otherwise
   if [[ ! -s "$tsv" ]]; then
     echo "[w] skipping $out_stem: missing labels TSV ($tsv)" >&2
     ((skipped++)) || true
@@ -116,13 +105,10 @@ for gfa in "${GFAS[@]}"; do
     continue
   fi
 
-  # 1) PRUNED SHORT GFA -> export set/, renamed to v8 name
   cp -f "$gfa" "$E/set/$out_stem.assembly.gfa.gz"
 
-  # 2) v8-schema gfa.csv from transferred labels (fractions -> bp)
   synth_csv "$tsv" "$E/set/$out_stem.gfa.csv"
 
-  # 3) Edge-read support (required)
   cp -f "$edge_csv" "$E/set/$out_stem.edge_reads.csv"
 
   ((exported++)) || true
@@ -144,15 +130,12 @@ for g in "$E"/set/*.assembly.gfa.gz; do
   echo "$gg,$cc,$ee,$s" >> "$CSV"
 done
 
-# Checksums for everything under set/
 ( cd "$E" && find set -type f -print0 | xargs -0 sha256sum > meta/checksums.sha256 )
 
-# Keep v9 provenance manifest if present
 [[ -s "$SEL/plasgraph2_manifest.csv" ]] && cp -f "$SEL/plasgraph2_manifest.csv" "$E/" || true
 
 touch "$E/_OK.export_set"
 
-# Also write markers where cleanup expects them (v9 preferred + v8 legacy)
 mkdir -p "$BASE/batches_being_processed/${BATCH_ID}.SHORT"
 touch    "$BASE/batches_being_processed/${BATCH_ID}.SHORT/_OK.export_set"
 mkdir -p "$BASE/batches_being_processed/$BATCH_ID"
@@ -161,7 +144,6 @@ touch    "$BASE/batches_being_processed/$BATCH_ID/_OK.export_set"
 echo "[OK] export_set built for batch $BATCH_ID (exported=$exported, skipped=$skipped)" >&2
 EOF
 
-# ---------------------- Pull export_set to VDI & verify ----------------------
 rsync -av --info=progress2 "$REMOTE:~/$PROJ/batches_being_processed/$BATCH_ID/export_set/" "$DEST_DIR/"
 
 csv_rel="$DEST_DIR/eskapee_${MODE}_new.csv"
@@ -175,7 +157,6 @@ n_edge=$(ls -1 "$DEST_DIR"/set/*.edge_reads.csv 2>/dev/null | wc -l | tr -d ' ')
   echo "[e] count mismatch after transfer: rel=$n_rel gfa=$n_gfa csv=$n_lbl edge=$n_edge" >&2; exit 1;
 }
 
-# Require every edge_csv in manifest to exist & be non-empty
 tail -n +2 "$csv_rel" | while IFS=, read -r _ _ edge_rel _; do
   [[ -n "$edge_rel" && -s "$DEST_DIR/$edge_rel" ]] || {
     echo "[e] listed edge_csv missing or empty: $DEST_DIR/${edge_rel:-<empty>}" >&2
@@ -183,7 +164,6 @@ tail -n +2 "$csv_rel" | while IFS=, read -r _ _ edge_rel _; do
   }
 done
 
-# Optional checksum verification
 if [[ -s "$DEST_DIR/meta/checksums.sha256" ]]; then
   ( cd "$DEST_DIR" && sha256sum -c meta/checksums.sha256 )
 fi
